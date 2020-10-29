@@ -44,6 +44,7 @@ require_git_repo
 require_hubflow_initialized
 hubflow_load_settings
 PREFIX=$(git config --get hubflow.prefix.feature)
+PATTERN="^[A-Z]+-[0-9]+-"
 
 usage() {
     echo "usage: git hf feature [list] [-v]"
@@ -67,20 +68,17 @@ cmd_list() {
     DEFINE_boolean verbose false 'verbose (more) output' v
     parse_args "$@"
 
-    local pattern
     local current_branch
     local feature_branches
 
-    pattern="^[A-Z]+-[0-9]+-"
-
     current_branch=$(git branch --no-color | grep '^\* ' | grep -v 'no branch' | sed 's/^* //g')
-    feature_branches=$(echo "$(git_local_branches)" | egrep "$pattern")
+    feature_branches=$(echo "$(git_local_branches)" | egrep "$PATTERN")
     if [ -z "$feature_branches" ]; then
         warn "No feature branches exist."
         warn ""
         warn "You can start a new feature branch:"
         warn ""
-        warn "    git hf feature start <ticket> <name> [<base>]"
+        warn "    git hf feature start <name> [<base>]"
         warn ""
         exit 0
     fi
@@ -128,25 +126,37 @@ cmd_help() {
     exit 0
 }
 
+validate_name_arg() {
+    local match
+    match=$(echo "$NAME" | egrep "$PATTERN")
+    if [ -z "$match" ]; then
+        warn "Feature name is expected to have 'XXX-000-implement_new_feature' format."
+        warn ""
+        exit 0
+    fi
+}
+
 require_name_arg() {
     if [ "$NAME" = "" ]; then
         warn "Missing argument <name>"
         usage
         exit 1
     fi
+
+    validate_name_arg
 }
 
-expand_nameprefix_arg() {
+ensure_branch_exists() {
     require_name_arg
 
     local expanded_name
     local exitcode
-    track_repo=$(hubflow_track_repo "$NAME" "$PREFIX" "$ORIGIN")    
-    expanded_name=$(hubflow_resolve_nameprefix "$NAME" "$PREFIX")
+    track_repo=$(hubflow_track_repo "$NAME" "$ORIGIN")
+    expanded_name=$(hubflow_resolve_name "$NAME")
     exitcode=$?
     case $exitcode in
         0) NAME=$expanded_name
-           BRANCH=$PREFIX$NAME
+           BRANCH=$NAME
            ;;
         *) exit 1 ;;
     esac
@@ -154,20 +164,22 @@ expand_nameprefix_arg() {
 
 use_current_feature_branch_name() {
     local current_branch=$(git_current_branch)
-    if startswith "$current_branch" "$PREFIX"; then
+    if startswith "$current_branch"; then
         BRANCH=$current_branch
-        NAME=${BRANCH#$PREFIX}
+        NAME=${BRANCH}
     else
         warn "The current HEAD is no feature branch."
         warn "Please specify a <name> argument."
         exit 1
     fi
+
+    validate_name_arg
 }
 
-expand_nameprefix_arg_or_current() {
+ensure_branch_exists_or_current() {
     if [ "$NAME" != "" ]; then
-        expand_nameprefix_arg
-        require_branch "$PREFIX$NAME"
+        ensure_branch_exists
+        require_branch "$NAME"
     else
         use_current_feature_branch_name
     fi
@@ -186,7 +198,7 @@ parse_args() {
 
     # read arguments into global variables
     NAME=$1
-    BRANCH=$PREFIX$NAME
+    BRANCH=$NAME
 }
 
 parse_remote_name() {
@@ -197,7 +209,7 @@ parse_remote_name() {
     # read arguments into global variables
     REMOTE=$1
     NAME=$2
-    BRANCH=$PREFIX$NAME
+    BRANCH=$NAME
 }
 
 cmd_start() {
@@ -341,7 +353,7 @@ cmd_finish() {
     DEFINE_boolean force_delete false "force delete feature branch after finish" D
     DEFINE_boolean force_merge false "force merge of feature branch if not merged yet at origin" f
     parse_args "$@"
-    expand_nameprefix_arg_or_current
+    ensure_branch_exists_or_current
 
     # sanity checks
     require_branch "$BRANCH"
@@ -434,7 +446,7 @@ cmd_diff() {
     parse_args "$@"
 
     if [ "$NAME" != "" ]; then
-        expand_nameprefix_arg
+        ensure_branch_exists
         BASE=$(git merge-base "$DEVELOP_BRANCH" "$BRANCH")
         git diff "$BASE..$BRANCH"
     else
@@ -451,7 +463,7 @@ cmd_checkout() {
     parse_args "$@"
 
     if [ "$NAME" != "" ]; then
-        expand_nameprefix_arg
+        ensure_branch_exists
         git checkout "$BRANCH"
     else
         die "Name a feature branch explicitly."
@@ -466,7 +478,7 @@ cmd_co() {
 cmd_rebase() {
     DEFINE_boolean interactive false 'do an interactive rebase' i
     parse_args "$@"
-    expand_nameprefix_arg_or_current
+    ensure_branch_exists_or_current
     warn "Will try to rebase '$NAME'..."
     require_clean_working_tree
     require_branch "$BRANCH"
