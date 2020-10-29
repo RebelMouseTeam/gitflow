@@ -67,50 +67,52 @@ cmd_list() {
     DEFINE_boolean verbose false 'verbose (more) output' v
     parse_args "$@"
 
-    local feature_branches
+    local pattern
     local current_branch
-    local short_names
-    feature_branches=$(echo "$(git_local_branches)" | grep "^$PREFIX")
+    local feature_branches
+
+    pattern="^[A-Z]+-[0-9]+-"
+
+    current_branch=$(git branch --no-color | grep '^\* ' | grep -v 'no branch' | sed 's/^* //g')
+    feature_branches=$(echo "$(git_local_branches)" | egrep "$pattern")
     if [ -z "$feature_branches" ]; then
         warn "No feature branches exist."
         warn ""
         warn "You can start a new feature branch:"
         warn ""
-        warn "    git hf feature start <name> [<base>]"
+        warn "    git hf feature start <ticket> <name> [<base>]"
         warn ""
         exit 0
     fi
-    current_branch=$(git branch --no-color | grep '^\* ' | grep -v 'no branch' | sed 's/^* //g')
-    short_names=$(echo "$feature_branches" | sed "s ^$PREFIX  g")
 
     # determine column width first
     local width=0
     local branch
-    for branch in $short_names; do
+    for branch in $feature_branches; do
         local len=${#branch}
         width=$(max $width $len)
     done
     width=$(($width+3))
 
     local branch
-    for branch in $short_names; do
-        local fullname=$PREFIX$branch
-        local base=$(git merge-base "$fullname" "$DEVELOP_BRANCH")
-        local develop_sha=$(git rev-parse "$DEVELOP_BRANCH")
-        local branch_sha=$(git rev-parse "$fullname")
-        if [ "$fullname" = "$current_branch" ]; then
+    for branch in $feature_branches; do
+        if [ "$branch" = "$current_branch" ]; then
             printf "* "
         else
             printf "  "
         fi
         if flag verbose; then
+            local base=$(git merge-base "$branch" "$DEVELOP_BRANCH")
+            local develop_sha=$(git rev-parse "$DEVELOP_BRANCH")
+            local branch_sha=$(git rev-parse "$branch")
+
             printf "%-${width}s" "$branch"
             if [ "$branch_sha" = "$develop_sha" ]; then
                 printf "(no commits yet)"
             elif [ "$base" = "$branch_sha" ]; then
-                printf "(is behind develop, may ff)"
+                printf "(is behind $DEVELOP_BRANCH, may ff)"
             elif [ "$base" = "$develop_sha" ]; then
-                printf "(based on latest develop)"
+                printf "(based on latest $MASTER_BRANCH)"
             else
                 printf "(may be rebased)"
             fi
